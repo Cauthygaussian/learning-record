@@ -1,5 +1,36 @@
 package mr
 
+
+/*
+注释，用于检验，看提交结果。
+*/
+
+/*
+Git 分支推送速查（本文件仅附带说明，不影响运行）:
+1. 查看/创建本地分支:
+   git branch
+   git switch -c mit6.824lab1   # 若分支不存在
+2. 添加远程(若尚未添加):
+   git remote add origin https://github.com/Cauthygaussian/learning-record.git
+3. 获取远程:
+   git fetch origin
+4. 可选：与远程主分支同步:
+   git pull --rebase origin main   # 或 master
+5. 提交更新:
+   git add .
+   git commit -m "Update mit6.824lab1"
+6. 首次推送并建立跟踪:
+   git push -u origin mit6.824lab1
+7. 后续更新:
+   git push origin mit6.824lab1
+8. 若提示 non-fast-forward 且确认覆盖:
+   git push -f origin mit6.824lab1   # 谨慎
+9. 查看远程分支:
+   git ls-remote --heads origin
+10. 推送成功后即可在 GitHub 上发起 PR 或直接使用该分支.
+*/
+
+// ...existing code...
 import (
 	"encoding/json"
 	"fmt"
