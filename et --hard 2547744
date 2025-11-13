@@ -1,0 +1,22 @@
+[33m1f89d82[m[33m ([m[1;36mHEAD -> [m[1;32mmit6.824lab1[m[33m, [m[1;31morigin/mit6.824lab1[m[33m)[m HEAD@{0}: rebase (continue) (finish): returning to refs/heads/mit6.824lab1
+[33m1f89d82[m[33m ([m[1;36mHEAD -> [m[1;32mmit6.824lab1[m[33m, [m[1;31morigin/mit6.824lab1[m[33m)[m HEAD@{1}: rebase (continue) (pick): lab1 finished
+[33m2547744[m HEAD@{2}: rebase (continue) (pick): update
+[33me28f478[m HEAD@{3}: rebase (continue) (pick): update
+[33m1c11999[m HEAD@{4}: rebase (continue) (pick): update
+[33mb835261[m HEAD@{5}: rebase (continue) (pick): update
+[33mcae6d54[m HEAD@{6}: rebase (continue) (pick): update
+[33m689a467[m HEAD@{7}: rebase (continue) (pick): update
+[33mf9e80bb[m HEAD@{8}: rebase (continue) (pick): update
+[33m3a82065[m HEAD@{9}: rebase (continue) (pick): update
+[33mdfbe075[m HEAD@{10}: rebase (continue) (pick): update
+[33m4cea073[m HEAD@{11}: rebase (continue) (pick): remove
+[33m639ccc9[m HEAD@{12}: rebase (continue) (pick): x
+[33m3175355[m HEAD@{13}: rebase (continue) (pick): update
+[33me314bec[m HEAD@{14}: rebase (continue) (pick): Delete shardkv1/kvsrv1
+[33m7b36e69[m HEAD@{15}: rebase (continue) (pick): update
+[33ma55c7b9[m HEAD@{16}: rebase (continue) (pick): update
+[33m6511d50[m HEAD@{17}: rebase (continue) (pick): update
+[33mada5f6e[m HEAD@{18}: rebase (continue) (pick): update
+[33mfeb299c[m HEAD@{19}: rebase (continue) (pick): update
+[33mb862b45[m HEAD@{20}: rebase (continue) (pick): lab 4+5 makefile update
+[33m85aadb1[m HEAD@{21}: rebase (continue) (pick): update
