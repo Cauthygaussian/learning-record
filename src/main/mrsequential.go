@@ -47,7 +47,7 @@ func main() {
 		}
 		file.Close()
 		kva := mapf(filename, string(content))
-		intermediate = append(intermediate, kva...)
+		intermediate = append(intermediate, kva...) 
 	}
 
 	//
