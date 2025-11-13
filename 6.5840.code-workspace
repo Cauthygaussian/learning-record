@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"extensions": {
+		"recommendations": [
+			"github.copilot-chat"
+		]
+	},
+	"settings": {}
+}
