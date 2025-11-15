@@ -30,16 +30,16 @@ func MakeClerk(clnt *tester.Clnt, server string) kvtest.IKVClerk {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
-	args := rpc.GetArgs{Key: key}
-	for {
+	args := rpc.GetArgs{
+		Key : key,
+	}
+	for{
 		reply := rpc.GetReply{}
 		ok := ck.clnt.Call(ck.server, "KVServer.Get", &args, &reply)
-		if ok {
-			// Return immediately on a valid server response.
-			return reply.Value, reply.Version, reply.Err
+		if ok{
+			return reply.Value, reply.Version ,reply.Err 
 		}
-		// Retry on network failure.
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100*time.Millisecond)
 	}
 }
 
@@ -61,27 +61,32 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
-	args := rpc.PutArgs{Key: key, Value: value, Version: version}
-	first := true
-	for {
+	args := rpc.PutArgs{
+		Key : key, 
+		Value : value, 
+		Version :version,
+	}
+	first := true 
+
+	for{
 		reply := rpc.PutReply{}
 		ok := ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
-		if ok {
-			switch reply.Err {
-			case rpc.OK, rpc.ErrNoKey:
-				return reply.Err
+		if ok{
+			switch reply.Err{
+			case rpc.OK:
+				return rpc.OK 
+			case rpc.ErrNoKey:
+				return rpc.ErrNoKey 
 			case rpc.ErrVersion:
-				if first { // first definitive reply -> certain failure
+				if first{
 					return rpc.ErrVersion
+				}else{
+					return rpc.ErrMaybe
 				}
-				// subsequent ErrVersion could mean previous OK lost
-				return rpc.ErrMaybe
-			default:
-				// unexpected error: treat as retry
 			}
-			first = false
 		}
-		// network failure -> retry
+		first = false
 		time.Sleep(10 * time.Millisecond)
 	}
+	
 }
