@@ -23,6 +23,9 @@ type KVServer struct {
 	mu sync.Mutex
 
 	// Your definitions here.
+	data              map[string]string 
+	lastVersion       map[string]Tversion
+	lastRecord        map[string]string
 }
 
 func MakeKVServer() *KVServer {
@@ -35,6 +38,15 @@ func MakeKVServer() *KVServer {
 // exists. Otherwise, Get returns ErrNoKey.
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	// Your code here.
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	reply.Value = kv.data[args.Key]
+	if reply.Value == ""{
+		reply.Err = rpc.ErrNoKey 
+	}else{
+		reply.Err = rpc.OK 
+	}
 }
 
 // Update the value for a key if args.Version matches the version of
@@ -43,6 +55,22 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 // args.Version is 0, and returns ErrNoKey otherwise.
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 	// Your code here.
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	if kv.data[args.Key] == ""{
+		reply.Err = rpc.ErrNoKey
+		return 
+	}
+
+	if kv.lastVersion[args.Key] == args.Version{
+		reply.Err = rpc.ErrVersion
+		return 
+	}
+
+	kv.data[args.Key] = args.Value 
+	reply.Err = rpc.OK
+	return 
 }
 
 // You can ignore Kill() for this lab

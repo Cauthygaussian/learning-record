@@ -15,6 +15,7 @@ type Clerk struct {
 func MakeClerk(clnt *tester.Clnt, server string) kvtest.IKVClerk {
 	ck := &Clerk{clnt: clnt, server: server}
 	// You may add code here.
+
 	return ck
 }
 
@@ -30,6 +31,13 @@ func MakeClerk(clnt *tester.Clnt, server string) kvtest.IKVClerk {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// You will have to modify this function.
+	args := &rpc.GetArgs{
+		Key: key,
+	}
+	reply := &rpc.GetReply{}
+	for !ck.server.Call("KVServer.Get",args, reply){
+
+	}
 	return "", 0, rpc.ErrNoKey
 }
 
@@ -52,5 +60,15 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
+	args := &rpc.PutArgs{
+		Key: key,
+		Value: value, 
+		Version: version,
+	}
+	reply := &rpc.PutReply{}
+	for !ck.server.Call("KVServer.Put", args, reply){
+
+	}
+	
 	return rpc.ErrNoKey
 }
