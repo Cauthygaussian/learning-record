@@ -26,7 +26,7 @@ type Lock struct {
 // precisely what the lock state is).
 func MakeLock(ck kvtest.IKVClerk, l string) *Lock {
 	rand.Seed(time.Now().UnixNano())
-	unique := fmt.Sprintf("%d", rand.Int())
+	unique := fmt.Sprintf("%d-%d", rand.Int(),time.Now().UnixNano())
 
 	lk := &Lock{ck: ck, Key: l, id: unique}
 	// You may add code here
@@ -35,60 +35,53 @@ func MakeLock(ck kvtest.IKVClerk, l string) *Lock {
 
 func (lk *Lock) Acquire() {
 	// Your code here
-	for {
-		v, ver, err := lk.ck.Get(lk.Key)
-		if err == rpc.OK {
-			if v == lk.id { // already hold the lock
-				return
-			}
-			if v == "" { // free, try to acquire
-				perr := lk.ck.Put(lk.Key, lk.id, ver)
-				if perr == rpc.OK {
-					return
-				}
-				if perr == rpc.ErrMaybe { // confirm
-					v2, _, _ := lk.ck.Get(lk.Key)
-					if v2 == lk.id {
-						return
+	for{
+		id1, ver1, err := lk.ck.Get(lk.Key)
+		if err == rpc.OK{
+			if id1 == lk.id{
+				return 
+			}else if id1 == ""{
+				// The key does not exist, so we can create it
+				perr := lk.ck.Put(lk.Key, lk.id, ver1)
+				if perr == rpc.OK{
+					return 
+				}else if perr == rpc.ErrMaybe{
+					// The put may have succeeded, so we try again
+					id2, _, _ := lk.ck.Get(lk.Key)
+					if id2 == lk.id{
+						return 
 					}
 				}
-				// ErrVersion -> someone else won; retry
 			}
-			// held by others -> wait and retry
-		} else if err == rpc.ErrNoKey { // treat as empty key with version 0
-			perr := lk.ck.Put(lk.Key, lk.id, ver)
-			if perr == rpc.OK {
-				return
-			}
-			if perr == rpc.ErrMaybe {
-				v2, _, _ := lk.ck.Get(lk.Key)
-				if v2 == lk.id {
-					return
+		}else if err == rpc.ErrNoKey{
+			perr := lk.ck.Put(lk.Key, lk.id, ver1)
+			if perr == rpc.OK{
+				return 
+			}else if perr == rpc.ErrMaybe{
+				id2, _, _ := lk.ck.Get(lk.Key)
+				if id2 == lk.id{
+					return 
 				}
 			}
 		}
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond) // wait before retrying
 	}
 }
 
 func (lk *Lock) Release() {
 	// Your code here
-	for {
-		v, ver, err := lk.ck.Get(lk.Key)
-		if err == rpc.OK {
-			if v != lk.id { // not owner; consider released
-				return
+	id1, ver1, err := lk.ck.Get(lk.Key)
+	if err == rpc.OK {
+		if id1 != lk.id{
+			return 
+		}else {
+			// We can release the lock by deleting the key
+			perr := lk.ck.Put(lk.Key, "", ver1)
+			if perr == rpc.OK{
+				return 
 			}
-			perr := lk.ck.Put(lk.Key, "", ver)
-			if perr == rpc.OK || perr == rpc.ErrMaybe {
-				return
-			}
-			// ErrVersion -> changed by others; loop to observe state
-		} else if err == rpc.ErrNoKey {
-			// treat as already released
-			return
 		}
-		time.Sleep(1 * time.Millisecond)
+	}else if err == rpc.ErrNoKey{
+		return 
 	}
-	
 }
