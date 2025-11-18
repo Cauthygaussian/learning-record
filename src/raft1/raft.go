@@ -19,6 +19,31 @@ import (
 	"6.5840/tester1"
 )
 
+const (
+	Follower = iota 
+	Candidate 
+	Leader 
+)
+
+type logEntry struct {
+	command interface{}  //客户端请求的命令
+	term int       //日志条目被添加时的任期
+}
+
+type AppendEntriesArgs struct{ 
+	term    int 
+	leaderID int 
+	prevLogIndex int   //上一个日志索引
+	prevLogTerm int    //上一个日志任期
+	leaderCommit int   //领导人已提交的最高日志索引
+	entries   []logEntry   
+}
+
+type AppendEntriesReply struct {
+	term int 
+	success  bool  //表示随从包含的项目是否匹配上一个日志索引和上一个日志任期
+}
+
 
 // A Go object implementing a single Raft peer.
 type Raft struct {
@@ -32,6 +57,23 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+	currentTerm int    //当前任期
+	votedFor int       //投票给了谁
+	log []logEntry      //当前的日志条目
+
+
+	//servers的易失性状态
+	commitIndex int  //已提交的最高日志条目的索引
+	lastApplied int  //已应用到状态机的最高日志条目的索引
+
+	//领导人的易失性状态
+	nextIndex []int   //对于每个服务器，要发送到该服务器的下一个日志条目的索引
+	matchIndex []int  //对于每个服务器，已知已复制到该服务器的最高日志条目的索引
+
+	//自己写的
+	state int    //当前节点的状态：跟随者、候选人、领导人
+	electionTimer *time.Timer //选举定时器
+	heartbeatTimer *time.Timer //心跳定时器
 }
 
 // return currentTerm and whether this server
@@ -105,12 +147,18 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// Your data here (3A, 3B).
+	term         int     //候选人的任期
+	candidateID  int     //候选人的ID
+	lastLogIndex int     //上一个日志的索引
+	lastLogTerm  int     //上一个日志的任期
 }
 
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
 type RequestVoteReply struct {
 	// Your data here (3A).
+	term int       
+	voteGranted  bool  //投票候选人是否投票支持或者反对
 }
 
 // example RequestVote RPC handler.
@@ -198,7 +246,7 @@ func (rf *Raft) ticker() {
 
 		// Your code here (3A)
 		// Check if a leader election should be started.
-
+		
 
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
@@ -224,6 +272,19 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (3A, 3B, 3C).
+	rf.currentTerm = 0
+	rf.votedFor = 0
+	rf.log = make([]logEntry, 0)
+	rf.commitIndex = -1 
+	rf.lastApplied = -1
+
+	rf.nextIndex = make([]int, len(peers))
+	rf.matchIndex = make([]int, len(peers))
+
+	rf.state = Follower
+
+	rf.electionTimer = time.NewTimer(randomElectionTimeout())
+	rf.heartbeatTimer = time.NewTimer(heartbeatTimeout())
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
