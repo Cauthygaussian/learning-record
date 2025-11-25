@@ -83,7 +83,6 @@ type Raft struct {
 	state int    //当前节点的状态：跟随者、候选人、领导人
 	electionTimer *time.Timer //选举定时器
 	heartbeatTimer *time.Timer //心跳定时器
-	electionTimeout time.Duration // 当前使用的选举超时时间
 	lastHeartbeat time.Time       // 最近一次收到心跳/授票时间
 	applyCh chan raftapi.ApplyMsg   //用于发送消息的通道
 	applyCond *sync.Cond    
@@ -125,43 +124,31 @@ func (rf *Raft) ChangeState(statement int){
 
 	switch statement{
 	case Follower, Candidate:
-		if rf.heartbeatTimer != nil {
-			if !rf.heartbeatTimer.Stop() {
-				select { case <-rf.heartbeatTimer.C: default: }
-			}
+		if rf.heartbeatTimer != nil{
+			rf.heartbeatTimer.Stop()
 		}
-		if rf.electionTimer != nil {
-			// 为本轮 follower/candidate 随机一个新的选举超时时间
-			rf.electionTimeout = randomElectionTimeout()
-			if !rf.electionTimer.Stop() {
-				select { case <-rf.electionTimer.C: default: }
-			}
-			rf.electionTimer.Reset(rf.electionTimeout)
+		if rf.electionTimer != nil{
+			rf.electionTimer.Reset(randomElectionTimeout())
 		}
 	case Leader:
-		//fmt.Printf("STATE: me=%d -> Leader term=%d logLen=%d\n", rf.me, rf.currentTerm, len(rf.log))
-		if rf.electionTimer != nil {
-			if !rf.electionTimer.Stop() {
-				select { case <-rf.electionTimer.C: default: }
-			}
+		if rf.electionTimer != nil{
+			rf.electionTimer.Stop()
 		}
-		if rf.heartbeatTimer != nil {
-			if !rf.heartbeatTimer.Stop() {
-				select { case <-rf.heartbeatTimer.C: default: }
-			}
+		if rf.heartbeatTimer != nil{
 			rf.heartbeatTimer.Reset(heartbeatTimeout())
 		}
+	}
 
 		//对nextIndex / matchIndex 进行初始化
 		lastIndex := len(rf.log) - 1 // 最后一条日志的下标，可能为 -1
 		for i := range rf.peers {
-			rf.nextIndex[i] = lastIndex + 1 // 下一条要发的下标，0..len
+			rf.nextIndex[i] = len(rf.log) // 下一条要发的下标，0..len
 			rf.matchIndex[i] = -1           // 初始没有复制任何日志
 		}
 		rf.matchIndex[rf.me] = lastIndex
 	}
 
-}
+
 
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
@@ -270,11 +257,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = rf.currentTerm
 		// 授予选票：认为看到了“领导活动”，延后自身选举
 		if rf.electionTimer != nil {
-			if !rf.electionTimer.Stop() {
-				select { case <-rf.electionTimer.C: default: }
-			}
-			rf.electionTimeout = randomElectionTimeout()
-			rf.electionTimer.Reset(rf.electionTimeout)
+			rf.electionTimer.Reset(randomElectionTimeout())
 		}
 		rf.lastHeartbeat = time.Now()
 	} else {
@@ -314,11 +297,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.ChangeState(Follower)
 	rf.lastHeartbeat = time.Now()
 	if rf.electionTimer != nil {
-		if !rf.electionTimer.Stop() {
-			select { case <-rf.electionTimer.C: default: }
-		}
-		rf.electionTimeout = randomElectionTimeout()
-		rf.electionTimer.Reset(rf.electionTimeout)
+		rf.electionTimer.Reset(randomElectionTimeout())
 	}
 
 
@@ -396,7 +375,7 @@ func (rf *Raft) SendAppendEntries(server int , args *AppendEntriesArgs, reply *A
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.state != Leader || args.Term < rf.currentTerm || rf.currentTerm != args.Term{
+	if rf.state != Leader || args.Term < rf.currentTerm{
 		return ok 
 	}
 
@@ -510,7 +489,7 @@ func (rf *Raft) SendHeartBeats() {
                 LeaderCommit: rf.commitIndex,
             }
 
-            nextIdx := rf.nextIndex[peer]      // 0-based: 下一条要发的下标, 0..len(log)
+            nextIdx := rf.nextIndex[peer]      // 0-based: 下一条要发的下标, 0..len(log)-1
             prevIdx := nextIdx - 1             // 0-based: 上一条的下标, 可能为 -1
 
             if prevIdx >= 0 && prevIdx < len(rf.log) {
@@ -557,11 +536,7 @@ func (rf *Raft) StartElection() {
 
     // 重新设置选举超时
     if rf.electionTimer != nil {
-        if !rf.electionTimer.Stop() {
-            select { case <-rf.electionTimer.C: default: }
-        }
-        rf.electionTimeout = randomElectionTimeout()
-        rf.electionTimer.Reset(rf.electionTimeout)
+        rf.electionTimer.Reset(randomElectionTimeout())
     }
 
     term := rf.currentTerm
@@ -711,23 +686,6 @@ func (rf *Raft) ticker() {
 		case <-rf.electionTimer.C:
 			rf.mu.Lock()
 			if rf.state != Leader {
-				// 最近如果刚收到心跳/授票，则推迟这轮选举，避免误判 leader 死亡
-				/*
-				elapsed := time.Since(rf.lastHeartbeat)
-				if rf.electionTimeout > 0 && elapsed < rf.electionTimeout/2 {
-					remain := rf.electionTimeout - elapsed
-					if remain < 10*time.Millisecond {
-						remain = 10 * time.Millisecond
-					}
-					if !rf.electionTimer.Stop() {
-						select { case <-rf.electionTimer.C: default: }
-					}
-					rf.electionTimer.Reset(remain)
-					rf.mu.Unlock()
-					break
-				}
-					*/
-				// 否则真正发起选举
 				rf.StartElection()
 			}
 			rf.mu.Unlock()
@@ -736,9 +694,6 @@ func (rf *Raft) ticker() {
 			rf.mu.Lock()
 			if rf.state == Leader {
 				rf.SendHeartBeats()
-				if !rf.heartbeatTimer.Stop() {
-					select { case <-rf.heartbeatTimer.C: default: }
-				}
 				rf.heartbeatTimer.Reset(heartbeatTimeout())
 			}
 			rf.mu.Unlock()
@@ -746,8 +701,8 @@ func (rf *Raft) ticker() {
 
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := 10 + (rand.Int63() % 40)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
+		//ms := 10 + (rand.Int63() % 40)
+		//time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
 
@@ -778,9 +733,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.matchIndex = make([]int, len(peers))
 
 	rf.state = Follower
-	rf.electionTimeout = randomElectionTimeout()
 	rf.lastHeartbeat = time.Now()
-	rf.electionTimer = time.NewTimer(rf.electionTimeout)
+	rf.electionTimer = time.NewTimer(randomElectionTimeout())
 	rf.heartbeatTimer = time.NewTimer(heartbeatTimeout())
 
 	rf.applyCh = applyCh
