@@ -684,19 +684,15 @@ func (rf *Raft) ticker() {
 		// Check if a leader election should be started.
 		select {
 		case <-rf.electionTimer.C:
-			rf.mu.Lock()
 			if rf.state != Leader {
 				rf.StartElection()
 			}
-			rf.mu.Unlock()
 
 		case <-rf.heartbeatTimer.C:
-			rf.mu.Lock()
 			if rf.state == Leader {
 				rf.SendHeartBeats()
 				rf.heartbeatTimer.Reset(heartbeatTimeout())
 			}
-			rf.mu.Unlock()
 		}
 
 		// pause for a random amount of time between 50 and 350
