@@ -11,11 +11,24 @@ type Clerk struct {
 	clnt    *tester.Clnt
 	servers []string
 	// You will have to modify this struct.
+	LastLeaderID int 
+	ClientID int64 
+	CommandID int64 
+}
+
+func nrand() int64{
+	max := big.NewInt(int64(1) << 62)
+	bigx, _ := rand.Int(rand.Reader, max)
+	x := bigx.Int64()
+	return x 
 }
 
 func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 	ck := &Clerk{clnt: clnt, servers: servers}
 	// You'll have to add code here.
+	ck.LastLeaderID = 0
+	ck.ClientID = nrand()
+	ck.CommandID = 0
 	return ck
 }
 
@@ -32,7 +45,34 @@ func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 
 	// You will have to modify this function.
-	return "", 0, ""
+	args := rpc.GetArgs{
+		Key : key,
+		ClinetID : ck.ClientID ,
+		CommandID : ck.CommandID ,
+	}
+	serverID := ck.LastLeaderID
+	for{
+		for i := 0; i < len(ck.servers); i++{
+			server := ck.servers[serverID]
+			getReply := rpc.GetReply{}
+			ok := ck.clnt.Call(server, "KVServer.Get", &args, &getReply)
+			if ok{
+				switch getReply.Err{
+				case rpc.OK:
+					ck.LastLeaderID = serverID
+					return getReply.Value, getReply.Version, rpc.OK
+				case rpc.ErrNoKey:
+					ck.LastLeaderID = serverID
+					return "", 0, rpc.ErrNoKey
+				case rpc.ErrWrongLeader:
+					//try next server
+
+				}
+			}
+			serverID = (serverID + 1) % len(ck.servers)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // Put updates key with value only if the version in the
@@ -53,6 +93,46 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
+	args := rpc.PutArgs{
+		Key : key, 
+		Value : value, 
+		Version :version,
+		ClientID : ck.ClientID ,
+		CommandID : ck.CommandID ,
+	}
+	first := true 
+	serverID := ck.LastLeaderID
+	for{
+		for i := 0; i < len(ck.servers); i++{
+			server := ck.servers[serverID]
+			reply := rpc.PutReply{}
+			ok := ck.clnt.Call(ck.servers[ck.LastLeaderID], "KVServer.Put", &args, &reply)
+			if ok{
+				switch reply.Err{
+				case rpc.OK:
+					ck.LastLeaderID = serverID
+					return rpc.OK 
+				case rpc.ErrNoKey:
+					ck.LastLeaderID = serverID
+					return rpc.ErrNoKey 
+				case rpc.ErrVersion:
+					ck.LastLeaderID = serverID
+					if first{
+						return rpc.ErrVersion
+					}else{
+						return rpc.ErrMaybe
+					}
+				}
+				case rpc.ErrWrongLeader:
+					//try next server
+			}
+			first = false
+			ck.LastLeaderID = (ck.LastLeaderID + 1) % len(ck.servers)
+			ck.CommandID++
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	// You will have to modify this function.
+	
 	return ""
 }

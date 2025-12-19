@@ -18,6 +18,9 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Me int 
+	ID int64 
+	Req any 
 }
 
 
@@ -41,6 +44,16 @@ type RSM struct {
 	maxraftstate int // snapshot if log grows this big
 	sm           StateMachine
 	// Your definitions here.
+	operationID int64  //生成唯一的operation ID
+	pendingOps map[int]chan any //存储没有完成的操作
+	shutdown atomic.Bool  //标记是否关闭
+
+}
+
+type PendingOp struct{
+	op Op  //操作
+	result any //操作结果
+	done chan bool //操作完成的信号通道
 }
 
 // servers[] contains the ports of the set of
@@ -64,10 +77,17 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		maxraftstate: maxraftstate,
 		applyCh:      make(chan raftapi.ApplyMsg),
 		sm:           sm,
+		operationID:  0, 
+		pendingOps:   make(map[int]*PendingOp),
 	}
+	rsm.shutdown.Store(false)
+
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
 	}
+
+	go rsm.reader()
+
 	return rsm
 }
 
@@ -86,5 +106,131 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	// is the argument to Submit and id is a unique id for the op.
 
 	// your code here
-	return rpc.ErrWrongLeader, nil // i'm dead, try another server.
+	if rsm.shutdown.Load(){
+		return rpc.ErrWrongLeader, nil // i'm dead, try another server.
+	}
+
+	opID := atomic.AddInt64(&rsm.operationID, 1)
+	op := Op{
+		Me : rsm.me, 
+		ID: opID, 
+		Req: req ,
+	}
+
+	index, term , isLeader := rsm.rf.Start(op)
+	if !isLeader{
+		return rpc.ErrWrongLeader, nil
+	}
+
+	pendingOp := &PendingOp{
+		op : op ,
+		done : make(chan bool, 1) ,
+	}
+
+	rsm.mu.Lock()
+	pendingOp, exits := rsm.pendingOps[index]
+	if exits{
+		select {
+			case pendingOp.done <- false :
+			default:	
+		}
+	}
+	rsm.pendingOps[index] = pendingOp
+	rsm.mu.Unlock()
+
+	err, result := rsm.waitForResult(pendingOp, term)
+
+	rsm.mu.Lock()
+	delete(rsm.pendingOps, index)
+	rsm.mu.Unlock()
+
+	return err, result 
+}
+
+func (rsm *RSM) waitForResult(pendingOp *PendingOp, term int) (rpc.Err, any){
+	timeout := time.NewTimer(100 * time.Millisecond)
+	defer timeout.Stop()
+
+	for{
+		if rsm.shutdown.Load(){
+			return rpc.ErrWrongLeader, nil // i'm dead, try another server.
+		}
+
+		select{
+		case <- timeout.C:
+			currentTerm, isLeader := rsm.rf.GetState()
+			if !isLeader || currentTerm != term{
+				return rpc.ErrWrongLeader, nil
+			}
+			timeout.Reset(100 * time.Millisecond)
+		case res := <- pendingOp.done:
+			if res{
+				return rpc.OK, pendingOp.result 
+			}else{
+				return rpc.ErrWrongLeader, nil 
+			}
+		}
+	}
+}
+
+func (rsm *RSM) reader(){
+	for{
+		msg, ok := <-rsm.applyCh 
+		if !ok{
+			rsm.handleShutdown()
+			return 
+		}
+		if rsm.shutdown.Load(){
+			return 
+		}
+		if msg.CommandValid{
+			rsm.applyCommand(msg)
+		}
+	}
+}
+
+func (rsm *RSM) handleShutdown(){
+	rsm.mu.Lock()
+	defer rsm.mu.Unlock()
+
+	rsm.shutdown.Store(true)
+
+	for _, pendingOp := range rsm.pendingOps{
+		select{
+		case pendingOp.done <- false:
+		default: 
+		}
+	}
+
+	rsm.pendingOps = make(map[int]*PendingOp)
+}
+
+func (rsm *RSM) applyCommand(msg raftapi.ApplyMsg){
+	op, ok := msg.Command.(Op)
+
+	if !ok{
+		panic("RSM.applyCommand: cannot cast msg.Command to Op")
+	}
+	rsm.mu.Lock()
+
+	result := rsm.sm.DoOp(op.Req)
+
+	pendingOp, exists := rsm.pendingOps[msg.CommandIndex]
+
+	if exists{
+		if pendingOp.op.ID == op.id && pendingOp.op.Me == rsm.me{
+			pendingOp.result = result
+			select{
+			case pendingOp.done <- true:
+			default: 
+			}
+		}else{
+			select{
+			case pendingOp.done <- false:
+			default:
+			}
+		}
+	}
+
+	rsm.mu.Unlock()
 }

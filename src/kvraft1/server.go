@@ -11,13 +11,24 @@ import (
 
 )
 
+type KVPair struct{
+	Value string 
+	Version rpc.Tversion
+}
+
 type KVServer struct {
 	me   int
 	dead int32 // set by Kill()
 	rsm  *rsm.RSM
 
 	// Your definitions here.
+	mu  sync.RWMutex 
+	store map[string]KVPair //key-value存储
+	locks map[string]*sync.RWMutex //key对应的锁
 }
+
+//获取特定键值的锁
+func (kv *KVServer) getLock(key string) *sync.RWMutex
 
 // To type-cast req to the right type, take a look at Go's type switches or type
 // assertions below:
@@ -26,6 +37,18 @@ type KVServer struct {
 // https://go.dev/tour/methods/15
 func (kv *KVServer) DoOp(req any) any {
 	// Your code here
+	switch r := req.(type){
+	case *rpc.PutArgs:
+		return kv.doPut(r)
+	case *rpc.GetArgs:
+		return kv.doGet(r)
+	case rpc.PutArgs:
+		return kv.doPut(&r)
+	case rpc.GetArgs:
+		return kv.doGet(&r)
+	default:
+		panic("unknown operation")
+	}
 	return nil
 }
 
@@ -36,6 +59,14 @@ func (kv *KVServer) Snapshot() []byte {
 
 func (kv *KVServer) Restore(data []byte) {
 	// Your code here
+}
+
+func (kv *KVServer) doGet(args *rpc.GetArgs) *rpc.GetReply {
+	if kv.killed(){
+		return &rpc.GetReply{Err: rpc.ErrWrongLeader}
+	}
+
+
 }
 
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
