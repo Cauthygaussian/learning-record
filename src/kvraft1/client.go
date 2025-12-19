@@ -1,6 +1,8 @@
 package kvraft
 
 import (
+	"time"
+
 	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
 	"6.5840/tester1"
@@ -16,18 +18,11 @@ type Clerk struct {
 	CommandID int64 
 }
 
-func nrand() int64{
-	max := big.NewInt(int64(1) << 62)
-	bigx, _ := rand.Int(rand.Reader, max)
-	x := bigx.Int64()
-	return x 
-}
 
 func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 	ck := &Clerk{clnt: clnt, servers: servers}
 	// You'll have to add code here.
 	ck.LastLeaderID = 0
-	ck.ClientID = nrand()
 	ck.CommandID = 0
 	return ck
 }
@@ -47,8 +42,6 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// You will have to modify this function.
 	args := rpc.GetArgs{
 		Key : key,
-		ClinetID : ck.ClientID ,
-		CommandID : ck.CommandID ,
 	}
 	serverID := ck.LastLeaderID
 	for{
@@ -97,8 +90,6 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 		Key : key, 
 		Value : value, 
 		Version :version,
-		ClientID : ck.ClientID ,
-		CommandID : ck.CommandID ,
 	}
 	first := true 
 	serverID := ck.LastLeaderID
@@ -106,7 +97,7 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 		for i := 0; i < len(ck.servers); i++{
 			server := ck.servers[serverID]
 			reply := rpc.PutReply{}
-			ok := ck.clnt.Call(ck.servers[ck.LastLeaderID], "KVServer.Put", &args, &reply)
+			ok := ck.clnt.Call(server, "KVServer.Put", &args, &reply)
 			if ok{
 				switch reply.Err{
 				case rpc.OK:
@@ -122,16 +113,19 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 					}else{
 						return rpc.ErrMaybe
 					}
-				}
 				case rpc.ErrWrongLeader:
 					//try next server
+				}
+				
 			}
-			first = false
-			ck.LastLeaderID = (ck.LastLeaderID + 1) % len(ck.servers)
-			ck.CommandID++
 		}
+		first = false
+		ck.LastLeaderID = (ck.LastLeaderID + 1) % len(ck.servers)
+		ck.CommandID++
 		time.Sleep(100 * time.Millisecond)
 	}
+	
+	
 	// You will have to modify this function.
 	
 	return ""

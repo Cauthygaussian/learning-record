@@ -89,12 +89,17 @@ func (rs *rsmSrv) Kill() {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	//log.Printf("kill %d", rs.me)
-	//rs.rsm.Kill()
+	if rs.rsm != nil {
+		rs.rsm.Kill()
+	}
 	rs.rsm = nil
 }
 
 func (rs *rsmSrv) Raft() raftapi.Raft {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
+	if rs.rsm == nil {
+		return nil
+	}
 	return rs.rsm.Raft()
 }

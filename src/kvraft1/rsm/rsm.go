@@ -1,14 +1,17 @@
 package rsm
 
 import (
+	//"bytes"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"6.5840/kvsrv1/rpc"
+	//"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raft1"
 	"6.5840/raftapi"
 	"6.5840/tester1"
-
 )
 
 var useRaftStateMachine bool // to plug in another raft besided raft1
@@ -45,7 +48,7 @@ type RSM struct {
 	sm           StateMachine
 	// Your definitions here.
 	operationID int64  //生成唯一的operation ID
-	pendingOps map[int]chan any //存储没有完成的操作
+	pendingOps map[int]*PendingOp //存储没有完成的操作
 	shutdown atomic.Bool  //标记是否关闭
 
 }
@@ -95,6 +98,16 @@ func (rsm *RSM) Raft() raftapi.Raft {
 	return rsm.rf
 }
 
+// Kill is called by the tester when it's done with the RSM instance.
+// It triggers immediate shutdown to unblock any waiting Submit() calls.
+func (rsm *RSM) Kill() {
+	// DPrintf("RSM %d Kill() called", rsm.me)
+	if rsm.rf != nil {
+		rsm.rf.Kill()
+	}
+	rsm.handleShutdown()
+}
+
 
 // Submit a command to Raft, and wait for it to be committed.  It
 // should return ErrWrongLeader if client should find new leader and
@@ -128,14 +141,21 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	}
 
 	rsm.mu.Lock()
-	pendingOp, exits := rsm.pendingOps[index]
-	if exits{
+	oldPendingOp, exists := rsm.pendingOps[index]
+	if exists {
 		select {
-			case pendingOp.done <- false :
-			default:	
+			case oldPendingOp.done <- false:
+			default:
 		}
 	}
 	rsm.pendingOps[index] = pendingOp
+	
+	// Check shutdown after adding to map to avoid race with Kill()
+	if rsm.shutdown.Load() {
+		delete(rsm.pendingOps, index)
+		rsm.mu.Unlock()
+		return rpc.ErrWrongLeader, nil
+	}
 	rsm.mu.Unlock()
 
 	err, result := rsm.waitForResult(pendingOp, term)
@@ -148,16 +168,28 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 }
 
 func (rsm *RSM) waitForResult(pendingOp *PendingOp, term int) (rpc.Err, any){
+	// Check shutdown immediately to avoid race between Kill() and adding to pendingOps
+	if rsm.shutdown.Load(){
+		return rpc.ErrWrongLeader, nil
+	}
+
 	timeout := time.NewTimer(100 * time.Millisecond)
 	defer timeout.Stop()
 
-	for{
-		if rsm.shutdown.Load(){
-			return rpc.ErrWrongLeader, nil // i'm dead, try another server.
-		}
+	// Periodic shutdown check ticker
+	shutdownCheck := time.NewTicker(10 * time.Millisecond)
+	defer shutdownCheck.Stop()
 
+	for{
 		select{
+		case <- shutdownCheck.C:
+			if rsm.shutdown.Load(){
+				return rpc.ErrWrongLeader, nil
+			}
 		case <- timeout.C:
+			if rsm.shutdown.Load(){
+				return rpc.ErrWrongLeader, nil
+			}
 			currentTerm, isLeader := rsm.rf.GetState()
 			if !isLeader || currentTerm != term{
 				return rpc.ErrWrongLeader, nil
@@ -218,7 +250,7 @@ func (rsm *RSM) applyCommand(msg raftapi.ApplyMsg){
 	pendingOp, exists := rsm.pendingOps[msg.CommandIndex]
 
 	if exists{
-		if pendingOp.op.ID == op.id && pendingOp.op.Me == rsm.me{
+		if pendingOp.op.ID == op.ID && pendingOp.op.Me == rsm.me{
 			pendingOp.result = result
 			select{
 			case pendingOp.done <- true:

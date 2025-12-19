@@ -135,7 +135,8 @@ func (rf *Raft) GetState() (int, bool) {
 	var isleader bool
 	// Your code here (3A).
 	term = rf.currentTerm 
-	isleader = (rf.state == Leader)
+	// After Kill(), return false for isleader so higher-level services stop waiting
+	isleader = (rf.state == Leader) && !rf.killed()
 	return term, isleader
 }
 

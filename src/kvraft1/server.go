@@ -1,6 +1,8 @@
 package kvraft
 
 import (
+	//"bytes"
+	"sync"
 	"sync/atomic"
 
 	"6.5840/kvraft1/rsm"
@@ -8,7 +10,6 @@ import (
 	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/tester1"
-
 )
 
 type KVPair struct{
@@ -22,13 +23,22 @@ type KVServer struct {
 	rsm  *rsm.RSM
 
 	// Your definitions here.
-	mu  sync.RWMutex 
+	mu  sync.Mutex 
 	store map[string]KVPair //key-value存储
 	locks map[string]*sync.RWMutex //key对应的锁
 }
 
 //获取特定键值的锁
-func (kv *KVServer) getLock(key string) *sync.RWMutex
+func (kv *KVServer) getLock(key string) *sync.RWMutex{
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	_, exists := kv.locks[key]
+	if !exists{
+		kv.locks[key] = &sync.RWMutex{}
+	}
+	return kv.locks[key]
+}
 
 // To type-cast req to the right type, take a look at Go's type switches or type
 // assertions below:
@@ -66,19 +76,109 @@ func (kv *KVServer) doGet(args *rpc.GetArgs) *rpc.GetReply {
 		return &rpc.GetReply{Err: rpc.ErrWrongLeader}
 	}
 
+	keyLock := kv.getLock(args.Key)
+	keyLock.RLock()
+	defer keyLock.RUnlock()
 
+	pair, ok := kv.store[args.Key]
+	if ok{
+		return &rpc.GetReply{
+			Err: rpc.OK,
+			Value: pair.Value,
+			Version: pair.Version,
+		}
+	}else{
+		return &rpc.GetReply{
+			Err: rpc.ErrNoKey,
+		}
+	}
+}
+
+func (kv *KVServer) doPut(args *rpc.PutArgs) *rpc.PutReply{
+	if kv.killed(){
+		return &rpc.PutReply{
+			Err: rpc.ErrWrongLeader,
+		}
+	}
+
+	keyLock := kv.getLock(args.Key)
+	keyLock.Lock()
+	defer keyLock.Unlock()
+
+	pair, ok := kv.store[args.Key]
+	if ok{
+		if args.Version == pair.Version{
+			kv.store[args.Key] = KVPair{
+				Value: args.Value,
+				Version: pair.Version + 1,
+			}
+			return &rpc.PutReply{
+				Err: rpc.OK,
+			}
+		}else{
+			return &rpc.PutReply{
+				Err: rpc.ErrVersion,
+			}
+		}
+	}else{
+		if args.Version == 0{
+			kv.store[args.Key] = KVPair{
+				Value: args.Value,
+				Version: 1,
+			}
+			return &rpc.PutReply{
+				Err: rpc.OK,
+			}
+		}else{
+			return &rpc.PutReply{
+				Err: rpc.ErrVersion,
+			}
+		}
+	}
 }
 
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	// Your code here. Use kv.rsm.Submit() to submit args
 	// You can use go's type casts to turn the any return value
 	// of Submit() into a GetReply: rep.(rpc.GetReply)
+	if kv.killed(){
+		reply.Err = rpc.ErrWrongLeader
+		return
+	}
+
+	err, rep := kv.rsm.Submit(args)
+	if err == rpc.ErrWrongLeader{
+		reply.Err = rpc.ErrWrongLeader
+		return 
+	}
+	getReply , ok := rep.(*rpc.GetReply)
+	if !ok{
+		reply.Err = rpc.ErrWrongLeader
+		return 
+	}
+	*reply = *getReply
 }
 
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 	// Your code here. Use kv.rsm.Submit() to submit args
 	// You can use go's type casts to turn the any return value
 	// of Submit() into a PutReply: rep.(rpc.PutReply)
+	if kv.killed(){
+		reply.Err = rpc.ErrWrongLeader
+		return
+	}
+
+	err, rep := kv.rsm.Submit(args)
+	if err == rpc.ErrWrongLeader{
+		reply.Err = rpc.ErrWrongLeader
+		return 
+	}
+	PutReply , ok := rep.(*rpc.PutReply)
+	if !ok{
+		reply.Err = rpc.ErrWrongLeader
+		return 
+	}
+	*reply = *PutReply
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -107,8 +207,15 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 	labgob.Register(rsm.Op{})
 	labgob.Register(rpc.PutArgs{})
 	labgob.Register(rpc.GetArgs{})
+	labgob.Register(KVPair{})
+	labgob.Register(map[string]KVPair{})
 
-	kv := &KVServer{me: me}
+	kv := &KVServer{
+		me: me,
+		mu: sync.Mutex{},
+		store: make(map[string]KVPair),
+		locks: make(map[string]*sync.RWMutex),
+	}
 
 
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
