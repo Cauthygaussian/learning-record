@@ -135,7 +135,8 @@ func (rf *Raft) GetState() (int, bool) {
 	var isleader bool
 	// Your code here (3A).
 	term = rf.currentTerm 
-	isleader = (rf.state == Leader)
+	// After Kill(), return false for isleader so higher-level services stop waiting
+	isleader = (rf.state == Leader) && !rf.killed()
 	return term, isleader
 }
 
@@ -708,15 +709,6 @@ func (rf *Raft) SendHeartBeats() {
     lastIncludedIndex := rf.lastIncludedIndex
     lastIncludedTerm := rf.lastIncludedTerm
     
-    // 拷贝一份 nextIndex，用于并发发送
-    nextCopy := make([]int, len(rf.nextIndex))
-    copy(nextCopy, rf.nextIndex)
-    
-    // 拷贝日志用于发送，避免并发读写 log slice
-    // 注意：全量拷贝可能较慢，优化方式是只拷贝需要的或者利用不可变性，但在 Lab 中这样是安全的
-    logCopy := make([]logEntry, len(rf.log))
-    copy(logCopy, rf.log)
-    //logLen := len(rf.log)
 
     for i := 0; i < len(rf.peers); i++ {
         if i == rf.me {
@@ -725,9 +717,9 @@ func (rf *Raft) SendHeartBeats() {
         server := i
         
         // 启动 goroutine 发送
-        // 启动 goroutine 发送
+
         go func(server int) {
-            prevIdx := nextCopy[server] - 1
+            prevIdx := rf.nextIndex[server] - 1
             
             // ================== 修改核心判断逻辑 ==================
             // 如果 prevIdx 小于 lastIncludedIndex，说明 Follower 落后太多，需要发快照
@@ -788,10 +780,10 @@ func (rf *Raft) SendHeartBeats() {
                 args.PrevLogTerm = lastIncludedTerm
             } else { // prevIdx > lastIncludedIndex
                 // 这里有一个边界检查，防止 nextIndex 越界
-                if prevIdx <= lastIncludedIndex + len(logCopy) {
+                if prevIdx <= lastIncludedIndex + len(rf.log) {
                      offset := prevIdx - lastIncludedIndex - 1
                      args.PrevLogIndex = prevIdx
-                     args.PrevLogTerm = logCopy[offset].Term
+                     args.PrevLogTerm = rf.log[offset].Term
                 } else {
                      // 这种情况理论上不应发生，除非 nextIndex 错乱，重置为末尾
                      args.PrevLogIndex = prevIdx
@@ -800,9 +792,9 @@ func (rf *Raft) SendHeartBeats() {
             }
 
             // Entries
-            if nextCopy[server] > lastIncludedIndex && nextCopy[server] <= lastIncludedIndex+len(logCopy) {
-                offset := nextCopy[server] - lastIncludedIndex - 1
-                args.Entries = append(args.Entries, logCopy[offset:]...)
+            if rf.nextIndex[server] > lastIncludedIndex && rf.nextIndex[server] <= lastIncludedIndex+len(rf.log) {
+                offset := rf.nextIndex[server] - lastIncludedIndex - 1
+                args.Entries = append(args.Entries, rf.log[offset:]...)
             }
 
             reply := AppendEntriesReply{}
